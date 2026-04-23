@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Network, Activity, ShieldAlert, Cpu, Terminal as TerminalIcon, Globe, Lock, BrainCircuit, Search, Database, Server } from 'lucide-react';
+import { Network, Activity, ShieldAlert, Cpu, Terminal as TerminalIcon, Globe, Lock, BrainCircuit, Search, Database, Server, Loader2, X } from 'lucide-react';
 import { cn } from './lib/utils';
 
 // Simulated WebSockets Data Stream
@@ -31,7 +31,15 @@ const EDGES = [
 export default function AegisDashboard() {
   const [events, setEvents] = useState(MOCK_EVENTS.slice(0, 1));
   const [activeNode, setActiveNode] = useState(null);
+  
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showResults, setShowResults] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
+  // Initial event stream simulation
   useEffect(() => {
     let index = 1;
     const interval = setInterval(() => {
@@ -45,6 +53,42 @@ export default function AegisDashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  // Handle clicking outside the search results
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setShowResults(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Search API call with debounce
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+    
+    const timeoutId = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+        const data = await res.json();
+        setSearchResults(data.results || []);
+        setShowResults(true);
+      } catch (e) {
+        console.error("Search failed:", e);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
   return (
     <div className="min-h-screen bg-background text-foreground overflow-hidden font-mono selection:bg-primary/30">
       {/* Background Grid & Vignette */}
@@ -53,29 +97,112 @@ export default function AegisDashboard() {
       
       {/* Top Header */}
       <header className="relative z-10 border-b border-border bg-card/50 backdrop-blur-md px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="relative flex items-center justify-center w-10 h-10 bg-primary/10 rounded-lg border border-primary/20">
+        <div className="flex items-center gap-4 w-1/4">
+          <div className="relative flex items-center justify-center w-10 h-10 bg-primary/10 rounded-lg border border-primary/20 shrink-0">
             <ShieldAlert className="w-6 h-6 text-primary" />
             <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-primary rounded-full animate-ping" />
           </div>
-          <div>
+          <div className="hidden sm:block">
             <h1 className="text-xl font-bold font-sans tracking-tight text-white shadow-primary drop-shadow-[0_0_10px_rgba(0,255,157,0.5)]">AEGIS-ULTIMA</h1>
-            <p className="text-xs text-muted-foreground uppercase tracking-widest">Autonomous Intelligence Engine</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-widest hidden lg:block">Autonomous Intelligence Engine</p>
           </div>
         </div>
         
-        <div className="flex items-center gap-8 text-sm">
+        {/* Global Search Bar */}
+        <div className="flex-1 flex justify-center w-1/2 relative z-50">
+          <div ref={searchRef} className="w-full max-w-lg relative group">
+            <div className={cn("flex items-center w-full bg-black/60 border rounded-lg transition-colors overflow-hidden",
+              showResults && (searchResults.length > 0 || isSearching) ? "border-primary/50 shadow-[0_0_15px_rgba(0,255,157,0.15)] rounded-b-none" : "border-border group-focus-within:border-primary/30"
+            )}>
+              <div className="pl-3 pr-2 py-2 flex items-center justify-center pointer-events-none text-muted-foreground">
+                {isSearching ? <Loader2 className="w-4 h-4 animate-spin text-primary" /> : <Search className="w-4 h-4" />}
+              </div>
+              <input 
+                type="text" 
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setShowResults(true);
+                }}
+                onFocus={() => setShowResults(true)}
+                placeholder="Search global intelligence databases (e.g. IPs, handles, hashes)..." 
+                className="w-full bg-transparent border-none outline-none py-2 pr-3 text-sm placeholder:text-muted-foreground/50 text-white"
+                spellCheck={false}
+              />
+              {searchQuery && (
+                <button 
+                  onClick={() => setSearchQuery("")}
+                  className="pr-3 pl-2 py-2 text-muted-foreground hover:text-white transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Global Search Results Dropdown */}
+            <AnimatePresence>
+              {showResults && searchQuery.trim() && !isSearching && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -5 }}
+                  className="absolute top-10 left-0 w-full bg-card/95 backdrop-blur-xl border border-t-0 border-primary/50 rounded-b-lg shadow-[0_10px_30px_rgba(0,0,0,0.8)] overflow-hidden max-h-[400px] overflow-y-auto custom-scrollbar"
+                >
+                  {searchResults.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-muted-foreground">
+                      No matching intelligence found for "{searchQuery}".
+                    </div>
+                  ) : (
+                    <div className="flex flex-col">
+                      <div className="px-3 py-1.5 bg-black/40 border-b border-border text-[10px] uppercase font-bold tracking-widest text-primary/70">
+                        {searchResults.length} {searchResults.length === 1 ? 'Result' : 'Results'} Extracted
+                      </div>
+                      <div className="p-1">
+                        {searchResults.map((res: any, idx: number) => {
+                          const Icon = res.type === 'domain' ? Globe : res.type === 'ip' ? Server : res.type === 'email' ? Database : res.type === 'social' ? Search : Lock;
+                          return (
+                            <button key={idx} className="w-full text-left p-2 hover:bg-primary/10 rounded flex items-start gap-3 transition-colors group cursor-pointer border border-transparent hover:border-primary/20">
+                               <div className="mt-1 w-6 h-6 rounded bg-black/50 border border-border flex items-center justify-center shrink-0">
+                                   <Icon className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
+                               </div>
+                               <div className="flex flex-col">
+                                   <span className="text-white text-sm font-bold truncate">{res.value}</span>
+                                   <span className="text-muted-foreground text-xs truncate">{res.context}</span>
+                               </div>
+                               <div className="ml-auto mt-0.5">
+                                 <span className={cn("text-[8px] uppercase tracking-widest px-1.5 py-0.5 rounded border leading-none whitespace-nowrap",
+                                    res.severity === 'critical' ? 'bg-destructive/20 text-destructive border-destructive/30' :
+                                    res.severity === 'high' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
+                                    res.severity === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+                                    'bg-primary/10 text-primary border-primary/20'
+                                 )}>
+                                   {res.type}
+                                 </span>
+                               </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+        
+        <div className="flex items-center justify-end gap-8 text-sm w-1/4">
           <div className="flex flex-col items-end">
-            <span className="text-muted-foreground text-xs uppercase">Engine Status</span>
-            <span className="text-primary font-bold flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-primary" /> ONLINE & HUNTING</span>
+            <span className="text-muted-foreground text-[10px] uppercase tracking-widest">Engine Status</span>
+            <span className="text-primary font-bold flex items-center gap-2 text-xs"><div className="w-2 h-2 rounded-full bg-primary" /> ONLINE & HUNTING</span>
           </div>
-          <div className="flex flex-col items-end hidden sm:flex">
-            <span className="text-muted-foreground text-xs uppercase">Active Nodes</span>
-            <span className="text-white font-bold">14,208</span>
+          <div className="flex flex-col items-end hidden lg:flex">
+            <span className="text-muted-foreground text-[10px] uppercase tracking-widest">Active Nodes</span>
+            <span className="text-white font-bold text-xs">14,208</span>
           </div>
-          <div className="flex flex-col items-end hidden sm:flex">
-            <span className="text-muted-foreground text-xs uppercase">Stealth Router</span>
-            <span className="text-purple-400 font-bold flex items-center gap-1"><Globe className="w-3 h-3"/> ROTATING TLS</span>
+          <div className="flex flex-col items-end hidden lg:flex">
+            <span className="text-muted-foreground text-[10px] uppercase tracking-widest">Stealth Router</span>
+            <span className="text-purple-400 font-bold flex items-center gap-1 text-xs"><Globe className="w-3 h-3"/> ROTATING TLS</span>
           </div>
         </div>
       </header>
