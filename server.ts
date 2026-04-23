@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import { GoogleGenAI } from "@google/genai";
 
 async function startServer() {
   const app = express();
@@ -41,6 +42,29 @@ async function startServer() {
     setTimeout(() => {
       res.json({ results });
     }, 400);
+  });
+
+  // AI Report Generation Endpoint
+  app.post("/api/generate-report", async (req, res) => {
+    try {
+      const { targetData } = req.body;
+      
+      const prompt = `You are the AEGIS-ULTIMA internal AI synthesis engine (NEXUS). Provide a brief, tactical intelligence summary (max 2-3 short paragraphs) based on this graph node data:
+${JSON.stringify(targetData, null, 2)}
+
+Focus on associated risks, lateral movement possibilities, and recommended actions. Format using clean Markdown. Do NOT use emojis. Be direct and analytical.`;
+
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt
+      });
+
+      res.json({ report: response.text });
+    } catch (error) {
+      console.error("AI Generation Error:", error);
+      res.status(500).json({ error: "Failed to generate nexus report." });
+    }
   });
 
   // Vite middleware for development

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Network, Activity, ShieldAlert, Cpu, Terminal as TerminalIcon, Globe, Lock, BrainCircuit, Search, Database, Server, Loader2, X } from 'lucide-react';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import Markdown from 'react-markdown';
 import { cn } from './lib/utils';
 
 // Simulated WebSockets Data Stream
@@ -30,13 +32,19 @@ const EDGES = [
 
 export default function AegisDashboard() {
   const [events, setEvents] = useState(MOCK_EVENTS.slice(0, 1));
-  const [activeNode, setActiveNode] = useState(null);
+  const [activeNode, setActiveNode] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
   
+  // AI State
+  const [aiReport, setAiReport] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
 
   // Initial event stream simulation
@@ -69,18 +77,25 @@ export default function AegisDashboard() {
     if (!searchQuery.trim()) {
       setSearchResults([]);
       setIsSearching(false);
+      setSearchError(null);
       return;
     }
     
     const timeoutId = setTimeout(async () => {
       setIsSearching(true);
+      setSearchError(null);
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+        if (!res.ok) {
+          throw new Error(`Server returned ${res.status}`);
+        }
         const data = await res.json();
         setSearchResults(data.results || []);
         setShowResults(true);
-      } catch (e) {
+      } catch (e: any) {
         console.error("Search failed:", e);
+        setSearchError(e.message || "Failed to fetch results.");
+        setShowResults(true);
       } finally {
         setIsSearching(false);
       }
@@ -88,6 +103,37 @@ export default function AegisDashboard() {
 
     return () => clearTimeout(timeoutId);
   }, [searchQuery]);
+
+  // Handle calling Express Backend for AI Generation
+  const handleGenerateAiReport = async () => {
+    setIsGenerating(true);
+    setAiReport(null);
+    try {
+      const activeData = selectedNode 
+         ? NODES.find(n => n.id === selectedNode) 
+         : { context: "Overall infrastructure overview involving 14k leaked records, obfuscated proxies, and active social media threats." };
+      
+      const response = await fetch('/api/generate-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ targetData: activeData })
+      });
+      
+      const data = await response.json();
+      if (data.report) {
+         setAiReport(data.report);
+      } else {
+         setAiReport("Failed to synthesize valid response.");
+      }
+    } catch (e) {
+      console.error(e);
+      setAiReport("CRITICAL EXCEPTION: Link to Google GenAI capabilities currently offline.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-hidden font-mono selection:bg-primary/30">
@@ -148,7 +194,13 @@ export default function AegisDashboard() {
                   exit={{ opacity: 0, y: -5 }}
                   className="absolute top-10 left-0 w-full bg-card/95 backdrop-blur-xl border border-t-0 border-primary/50 rounded-b-lg shadow-[0_10px_30px_rgba(0,0,0,0.8)] overflow-hidden max-h-[400px] overflow-y-auto custom-scrollbar"
                 >
-                  {searchResults.length === 0 ? (
+                  {searchError ? (
+                    <div className="p-4 text-center text-sm text-destructive flex flex-col items-center gap-2">
+                      <ShieldAlert className="w-5 h-5 text-destructive" />
+                      <span>Search Query Failed: {searchError}</span>
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">Check network connection</span>
+                    </div>
+                  ) : searchResults.length === 0 ? (
                     <div className="p-4 text-center text-sm text-muted-foreground">
                       No matching intelligence found for "{searchQuery}".
                     </div>
@@ -246,64 +298,142 @@ export default function AegisDashboard() {
 
         {/* Center Column: Knowledge Graph */}
         <div className="lg:col-span-6 bg-card/20 border border-border rounded-xl relative overflow-hidden backdrop-blur-sm flex flex-col">
-          <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
+          <div className="absolute top-4 left-4 z-20 flex items-center gap-2 pointer-events-none">
             <Network className="w-4 h-4 text-muted-foreground" />
             <h2 className="uppercase text-sm font-bold tracking-widest text-muted-foreground">Global Knowledge Graph</h2>
           </div>
           
-          {/* Mock Graph Rendering */}
-          <div className="flex-1 relative w-full h-full min-h-[400px]">
-            {/* Edges */}
-            <svg className="absolute inset-0 w-full h-full pointer-events-none">
-              {EDGES.map((edge, i) => {
-                const source = NODES.find(n => n.id === edge.source);
-                const target = NODES.find(n => n.id === edge.target);
-                if (!source || !target) return null;
-                const isHighlighted = activeNode === source.id || activeNode === target.id;
-                
-                return (
-                  <motion.line
-                    key={i}
-                    x1={`${source.x}%`}
-                    y1={`${source.y}%`}
-                    x2={`${target.x}%`}
-                    y2={`${target.y}%`}
-                    stroke={isHighlighted ? '#00ff9d' : '#272730'}
-                    strokeWidth={isHighlighted ? 2 : 1}
-                    initial={{ pathLength: 0 }}
-                    animate={{ pathLength: 1 }}
-                    transition={{ duration: 1, ease: "easeInOut" }}
-                  />
-                );
-              })}
-            </svg>
+          <div className="absolute top-4 right-4 z-20 text-[10px] text-muted-foreground flex gap-3 pointer-events-none uppercase tracking-widest bg-black/40 px-2 py-1 rounded border border-border">
+            <span>Scroll &bull; Zoom</span>
+            <span>Drag &bull; Pan</span>
+          </div>
 
-            {/* Nodes */}
-            {NODES.map((node) => {
-               const Icon = node.type === 'domain' ? Globe : node.type === 'ip' ? Server : node.type === 'email' ? Database : node.type === 'social' ? Search : Lock;
-               return (
-                 <motion.div
-                   key={node.id}
-                   className="absolute -ml-4 -mt-4 cursor-pointer z-10"
-                   style={{ left: `${node.x}%`, top: `${node.y}%` }}
-                   whileHover={{ scale: 1.2 }}
-                   onHoverStart={() => setActiveNode(node.id)}
-                   onHoverEnd={() => setActiveNode(null)}
-                   initial={{ scale: 0, opacity: 0 }}
-                   animate={{ scale: 1, opacity: 1 }}
-                   transition={{ type: 'spring', delay: Math.random() * 0.5 }}
-                 >
-                   <div className={cn("w-10 h-10 rounded-full flex items-center justify-center bg-card shadow-lg border-2 transition-colors", 
-                      activeNode === node.id || node.id === 'start' ? 'border-primary text-primary shadow-[0_0_15px_rgba(0,255,157,0.5)]' : 'border-border text-muted-foreground'
-                   )}>
-                     <Icon className="w-5 h-5" />
-                   </div>
-                   <div className="absolute top-12 left-1/2 -translate-x-1/2 whitespace-nowrap bg-background/90 px-2 py-0.5 rounded border border-border text-[10px] font-bold">
-                     {node.label}
-                   </div>
-                 </motion.div>
-               );
-            })}
+          {/* Graph Rendering */}
+          <div className="flex-1 relative w-full h-full min-h-[400px]">
+            <TransformWrapper
+              initialScale={1}
+              minScale={0.5}
+              maxScale={4}
+              centerZoomedOut={true}
+              wheel={{ step: 0.1 }}
+            >
+              <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-full !h-full">
+                <div 
+                  className="relative w-full h-full" 
+                  onClick={() => setSelectedNode(null)}
+                >
+                  {/* Edges */}
+                  <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                    {EDGES.map((edge, i) => {
+                      const source = NODES.find(n => n.id === edge.source);
+                      const target = NODES.find(n => n.id === edge.target);
+                      if (!source || !target) return null;
+                      
+                      const isHovered = activeNode === source.id || activeNode === target.id;
+                      const isSelected = selectedNode === source.id || selectedNode === target.id;
+                      
+                      let edgeStroke = '#272730';
+                      let edgeWidth = 1;
+                      let edgeOpacity = 1;
+
+                      if (selectedNode) {
+                        if (isSelected) {
+                          edgeStroke = '#00ff9d';
+                          edgeWidth = 2;
+                          edgeOpacity = 1;
+                        } else {
+                          edgeOpacity = 0.15;
+                        }
+                      } else if (activeNode) {
+                        if (isHovered) {
+                          edgeStroke = '#00ff9d';
+                          edgeWidth = 2;
+                          edgeOpacity = 1;
+                        } else {
+                          edgeOpacity = 0.15;
+                        }
+                      }
+                      
+                      return (
+                        <motion.line
+                          key={i}
+                          x1={`${source.x}%`}
+                          y1={`${source.y}%`}
+                          x2={`${target.x}%`}
+                          y2={`${target.y}%`}
+                          stroke={edgeStroke}
+                          strokeWidth={edgeWidth}
+                          opacity={edgeOpacity}
+                          initial={{ pathLength: 0 }}
+                          animate={{ pathLength: 1, stroke: edgeStroke, strokeWidth: edgeWidth, opacity: edgeOpacity }}
+                          transition={{ duration: 0.3 }}
+                        />
+                      );
+                    })}
+                  </svg>
+
+                  {/* Nodes */}
+                  {NODES.map((node) => {
+                     const Icon = node.type === 'domain' ? Globe : node.type === 'ip' ? Server : node.type === 'email' ? Database : node.type === 'social' ? Search : Lock;
+                     
+                     const isConnected = (nodeId1: string, nodeId2: string) => {
+                       return EDGES.some(e => (e.source === nodeId1 && e.target === nodeId2) || (e.source === nodeId2 && e.target === nodeId1));
+                     };
+
+                     const isHovered = activeNode === node.id || (activeNode && isConnected(activeNode, node.id));
+                     const isSelected = selectedNode === node.id || (selectedNode && isConnected(selectedNode, node.id));
+                     
+                     let nodeOpacity = 1;
+                     let isHighlighted = false;
+                     
+                     if (selectedNode) {
+                       if (isSelected) {
+                         nodeOpacity = 1;
+                         isHighlighted = selectedNode === node.id;
+                       } else {
+                         nodeOpacity = 0.2;
+                       }
+                     } else if (activeNode) {
+                       if (isHovered) {
+                         nodeOpacity = 1;
+                         isHighlighted = activeNode === node.id;
+                       } else {
+                         nodeOpacity = 0.4;
+                       }
+                     } else {
+                       isHighlighted = node.id === 'start';
+                     }
+
+                     return (
+                       <motion.div
+                         key={node.id}
+                         className="absolute -ml-4 -mt-4 cursor-pointer z-10"
+                         style={{ left: `${node.x}%`, top: `${node.y}%`, opacity: nodeOpacity }}
+                         whileHover={{ scale: 1.15 }}
+                         onHoverStart={() => setActiveNode(node.id)}
+                         onHoverEnd={() => setActiveNode(null)}
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           setSelectedNode(node.id === selectedNode ? null : node.id);
+                         }}
+                         initial={{ scale: 0, opacity: 0 }}
+                         animate={{ scale: 1, opacity: nodeOpacity }}
+                         transition={{ type: 'spring', delay: Math.random() * 0.3, opacity: { duration: 0.2 } }}
+                       >
+                         <div className={cn("w-10 h-10 rounded-full flex items-center justify-center bg-card shadow-lg border-2 transition-all duration-300", 
+                            isHighlighted ? 'border-primary text-primary shadow-[0_0_15px_rgba(0,255,157,0.5)] bg-black' : 'border-border text-muted-foreground hover:border-muted-foreground hover:text-white'
+                         )}>
+                           <Icon className="w-5 h-5" />
+                         </div>
+                         <div className="absolute top-12 left-1/2 -translate-x-1/2 whitespace-nowrap bg-background/90 px-2 py-0.5 rounded border border-border text-[10px] font-bold pointer-events-none">
+                           {node.label}
+                         </div>
+                       </motion.div>
+                     );
+                  })}
+                </div>
+              </TransformComponent>
+            </TransformWrapper>
           </div>
         </div>
 
@@ -319,47 +449,51 @@ export default function AegisDashboard() {
              {/* Scanlines Effect */}
              <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] z-50 opacity-20" />
 
-             <div className="space-y-4 text-sm relative z-10">
-               <div>
-                  <h3 className="text-xs font-bold uppercase text-muted-foreground mb-1">Target Profile</h3>
-                  <div className="bg-background rounded p-2 border border-border">
-                     <div className="flex justify-between items-center text-xs">
-                        <span className="text-muted-foreground">Primary:</span>
-                        <span className="font-bold">Target.io</span>
-                     </div>
-                     <div className="flex justify-between items-center text-xs mt-1">
-                        <span className="text-muted-foreground">Risk Level:</span>
-                        <span className="text-red-500 font-bold">CRITICAL</span>
-                     </div>
-                  </div>
+             {isGenerating ? (
+               <div className="flex flex-col items-center justify-center p-12 text-purple-400 gap-4 mt-12 z-10 relative">
+                 <Loader2 className="w-10 h-10 animate-spin" />
+                 <span className="text-xs font-bold uppercase tracking-widest animate-pulse">Running AI Synthesis...</span>
                </div>
-
-               <div>
-                 <h3 className="text-xs font-bold uppercase text-purple-400 mb-1 flex items-center gap-1"><Cpu className="w-3 h-3"/> Executive Summary</h3>
-                 <p className="text-xs text-secondary-foreground leading-relaxed bg-purple-900/10 border border-purple-500/20 p-3 rounded text-justify">
-                    Analysis indicates a complex organizational structure utilizing Cloudflare for obfuscation. <span className="text-red-400">Two critical breaches</span> have been correlated to administrative emails, exposing SHA-1 hashed passwords from older forums.
-                 </p>
+             ) : aiReport ? (
+               <div className="space-y-4 text-sm relative z-10">
+                 <div>
+                   <h3 className="text-xs font-bold uppercase text-purple-400 mb-2 flex items-center gap-1"><Cpu className="w-3 h-3"/> Executive Summary</h3>
+                   <div className="text-xs text-secondary-foreground space-y-4 bg-purple-900/10 border border-purple-500/20 p-4 rounded markdown-body leading-relaxed text-justify w-full">
+                     <Markdown>{aiReport}</Markdown>
+                   </div>
+                 </div>
                </div>
+             ) : (
+               <div className="space-y-4 text-sm relative z-10">
+                 <div>
+                    <h3 className="text-xs font-bold uppercase text-muted-foreground mb-1">Target Profile</h3>
+                    <div className="bg-background rounded p-2 border border-border">
+                       <div className="flex justify-between items-center text-xs">
+                          <span className="text-muted-foreground">Focus:</span>
+                          <span className="font-bold">{selectedNode ? NODES.find(n => n.id === selectedNode)?.label : "Global Overview"}</span>
+                       </div>
+                       <div className="flex justify-between items-center text-xs mt-1">
+                          <span className="text-muted-foreground">Confidence:</span>
+                          <span className="text-primary font-bold">94.2%</span>
+                       </div>
+                    </div>
+                 </div>
 
-               <div>
-                 <h3 className="text-xs font-bold uppercase text-muted-foreground mb-1">Recommended Attack Path</h3>
-                 <ul className="text-xs text-secondary-foreground space-y-2">
-                    <li className="flex items-start gap-2">
-                      <span className="text-primary mt-0.5">1.</span>
-                      <span>De-anonymize IP addresses using historical DNS resolving tools (SecurityTrails).</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="text-primary mt-0.5">2.</span>
-                      <span>Correlate leaked Pastebin hashes against MD5/SHA rainbow tables.</span>
-                    </li>
-                 </ul>
+                 <div>
+                   <h3 className="text-xs font-bold uppercase text-purple-400 mb-1 flex items-center gap-1"><Cpu className="w-3 h-3"/> Standby Mode</h3>
+                   <p className="text-xs text-secondary-foreground leading-relaxed bg-purple-900/10 border border-purple-500/20 p-3 rounded opacity-70">
+                      Nexus AI is currently on standby. Synthesize active node data to generate an automated threat advisory and recommended attack paths based on current graph state.
+                   </p>
+                 </div>
                </div>
-
-             </div>
+             )}
 
              <div className="mt-auto relative z-10">
-                 <button className="w-full py-2 bg-primary/10 border border-primary text-primary text-xs font-bold uppercase tracking-widest rounded transition-all hover:bg-primary/20 hover:shadow-[0_0_15px_rgba(0,255,157,0.3)]">
-                    Generate Full Report
+                 <button 
+                  onClick={handleGenerateAiReport}
+                  disabled={isGenerating}
+                  className="w-full py-2 bg-purple-500/10 border border-purple-500/50 text-purple-400 text-xs font-bold uppercase tracking-widest rounded transition-all hover:bg-purple-500/20 hover:shadow-[0_0_15px_rgba(168,85,247,0.3)] disabled:opacity-50 disabled:cursor-not-allowed">
+                    {isGenerating ? "Synthesizing..." : "Generate AI Report"}
                  </button>
              </div>
           </div>
